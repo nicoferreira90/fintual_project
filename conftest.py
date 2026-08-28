@@ -1,7 +1,5 @@
-import django
-from django.conf import settings
+import os
 
-
-def pytest_configure():
-    if not settings.configured:
-        django.setup()
+# settings.py refuses to import without these when DEBUG is off.
+os.environ.setdefault("DEBUG", "true")
+os.environ.setdefault("SECRET_KEY", "test-only-not-a-real-secret")

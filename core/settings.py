@@ -1,12 +1,31 @@
+import os
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-9!^p2zr8m=k$d3v0&xq+1wybho4ag&7lcfu+ej(nti6r%h@m4s"
 
-DEBUG = True
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
-ALLOWED_HOSTS = ["*"]
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+DEBUG = _env_bool("DEBUG", False)
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is off.")
+    SECRET_KEY = "django-insecure-dev-only-never-use-this-in-production"
+
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "*" if DEBUG else "")
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("ALLOWED_HOSTS must be set when DEBUG is off.")
 
 
 INSTALLED_APPS = [
@@ -51,16 +70,41 @@ TEMPLATES = [
 WSGI_APPLICATION = "core.wsgi.application"
 
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "backend_devops_interview",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
-        "HOST": "localhost",
-        "PORT": "5432",
-    }
-}
+def _database_config() -> dict:
+    """Build the default database config from the environment.
+
+    Fly injects a single DATABASE_URL; Compose and local runs use discrete
+    POSTGRES_* variables. urlparse does not percent-decode credentials and Fly
+    generates passwords containing reserved characters, hence unquote().
+    """
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        parts = urlparse(url)
+        config = {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": parts.path.lstrip("/"),
+            "USER": unquote(parts.username or ""),
+            "PASSWORD": unquote(parts.password or ""),
+            "HOST": parts.hostname or "",
+            "PORT": str(parts.port or ""),
+        }
+        sslmode = parse_qs(parts.query).get("sslmode")
+        if sslmode:
+            config["OPTIONS"] = {"sslmode": sslmode[0]}
+    else:
+        config = {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "backend_devops_interview"),
+            "USER": os.environ.get("POSTGRES_USER", "postgres"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        }
+    config["CONN_MAX_AGE"] = int(os.environ.get("CONN_MAX_AGE", "60"))
+    return config
+
+
+DATABASES = {"default": _database_config()}
 
 
 AUTH_PASSWORD_VALIDATORS = [
