@@ -17,6 +17,14 @@ def _env_list(name: str, default: str = "") -> list[str]:
 
 DEBUG = _env_bool("DEBUG", False)
 
+# The dev image never runs collectstatic (bind mount hides its output anyway),
+# so WhiteNoise has no manifest to serve from. WhiteNoise's own documented dev
+# workaround is this pair: serve straight from each app's static/ dir via
+# staticfiles finders, and skip the STATIC_ROOT existence check that would
+# otherwise warn since collectstatic never ran.
+WHITENOISE_USE_FINDERS = DEBUG
+WHITENOISE_AUTOREFRESH = DEBUG
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 if not SECRET_KEY:
     if not DEBUG:
