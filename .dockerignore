@@ -1,10 +1,12 @@
+.git
+.gitignore
+.venv
 __pycache__/
 *.py[cod]
-*.egg-info/
-.venv/
 .pytest_cache/
 .ruff_cache/
-.DS_Store
-*.sqlite3
 staticfiles/
+docs/
+*.md
 .env
+.github
