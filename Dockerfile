@@ -37,6 +37,12 @@ EXPOSE 8000
 FROM app AS dev
 COPY --from=dev-deps --chown=app:app /opt/venv /opt/venv
 USER app
+# Dev-image defaults so `pytest` and `manage.py` run without ceremony.
+# Compose and CI override these; the runtime stage deliberately gets none of them
+# and fails loudly if SECRET_KEY or ALLOWED_HOSTS is missing.
+ENV DEBUG=true \
+    SECRET_KEY=dev-only-not-a-real-secret \
+    ALLOWED_HOSTS=*
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
 
 FROM app AS runtime
