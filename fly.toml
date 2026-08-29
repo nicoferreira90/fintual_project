@@ -1,0 +1,43 @@
+app = "backend-devops-interview"
+primary_region = "scl"
+
+# Deploy sequence for a fresh Fly setup:
+#   fly apps create backend-devops-interview
+#   fly postgres create
+#   fly postgres attach <postgres-app-name>   # injects DATABASE_URL as a secret
+#   fly secrets set SECRET_KEY=... ALLOWED_HOSTS=... CSRF_TRUSTED_ORIGINS=...
+#   fly deploy
+
+[build]
+  dockerfile = "Dockerfile"
+  build-target = "runtime"
+
+[env]
+  PORT = "8000"
+  DEBUG = "false"
+  WEB_CONCURRENCY = "2"
+  WEB_THREADS = "4"
+  CONN_MAX_AGE = "60"
+
+[deploy]
+  release_command = "python manage.py migrate --noinput"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    # Fly's http_service checks deregister an instance from the load balancer
+    # rather than restarting it — readiness semantics, so /readyz, not /healthz.
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
