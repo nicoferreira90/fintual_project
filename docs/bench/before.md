@@ -277,6 +277,15 @@ docker compose stop web
 pattern as `${DB_PORT:-5432}` already in the file. No `-e` flag, no
 `docker compose run` workaround, no edit to the committed file.
 
+**Caution for anyone adapting this procedure**: `DEBUG` is per-invocation,
+not sticky. Every `docker compose up`/`run` in a reproduction must carry
+`DEBUG=false` itself — a later bare `docker compose up -d web` (without the
+prefix) recreates the container against the compose file's `${DEBUG:-true}`
+default and silently flips it back to `true`. This is exactly what happened
+a few times mid-investigation during Task 10 and cost some discarded
+capture attempts before it was traced to this cause; see
+`docs/bench/after.md`.
+
 ## Post-hoc correction (2026-08-29, found during Task 10)
 
 The search term `qui` used above is a defective before/after comparison

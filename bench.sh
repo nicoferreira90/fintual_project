@@ -11,6 +11,18 @@
 # can't tell "this endpoint is slow" from "the server was busy with something
 # else". Upgrade to k6/wrk against the gunicorn/runtime image if a
 # throughput or concurrent-load number is ever actually needed.
+#
+# Every request carries "X-Forwarded-Proto: https". core/settings.py sets
+# SECURE_SSL_REDIRECT=True whenever DEBUG=false and reads that exact header
+# via SECURE_PROXY_SSL_HEADER -- it's the app's own declared contract for
+# "a proxy already terminated TLS", true on Fly (the production target,
+# which forwards plain HTTP with that header after terminating TLS at the
+# edge) and false for a bare `curl` hitting runserver directly. Without the
+# header every plain-HTTP request 301s to a https:// URL runserver doesn't
+# speak, and the harness's own HTTP-status guard below (correctly) FATALs
+# on the first request. Supplying it isn't a workaround around the security
+# setting -- it's benchmarking the same request shape Fly's edge actually
+# forwards, which is more faithful to production than omitting it, not less.
 set -euo pipefail
 
 BASE="${1:-http://localhost:8000}"
@@ -50,7 +62,7 @@ bench() {
   out="$(mktemp)"
   for _ in $(seq "$runs"); do
     attempted=$((attempted + 1))
-    if resp="$(curl -s -o "$out" -w '%{http_code} %{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
+    if resp="$(curl -s -H "X-Forwarded-Proto: https" -o "$out" -w '%{http_code} %{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
       code="${resp%% *}"
       t="${resp#* }"
       if [ "$code" != "200" ]; then

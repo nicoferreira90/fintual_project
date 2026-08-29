@@ -7,12 +7,9 @@ Captured 2026-08-29, same machine/environment as `before.md`, same
 no pending migrations.
 
 **Read the two findings below before the table.** Neither is a defect in
-the performance track (Tasks 6-9) under test; both are consequences of
-other, unrelated things (a later commit, and a benchmark-term mistake), and
-both had to be corrected or worked around at the measurement layer to
-produce a valid comparison.
+the performance track (Tasks 6-9) under test.
 
-## Finding 1 — `SECURE_SSL_REDIRECT` regression blocks the literal `bench.sh` under `DEBUG=false`
+## Finding 1 — `SECURE_SSL_REDIRECT` needs a header the harness wasn't sending (now fixed in `bench.sh`)
 
 `docs/bench/before-http.md` was captured against commit `d0224f2`. Current
 `HEAD` includes `cd98ae5` ("feat: health endpoints, JSON logging, and
@@ -26,45 +23,42 @@ if not DEBUG:
     ...
 ```
 
-Correct behavior behind Fly's edge proxy (which sets
-`X-Forwarded-Proto: https`), but locally there is no proxy, so every plain
-`http://localhost:8000` request now looks insecure to Django and gets
-301-redirected to `https://localhost:8000/...` — a scheme `runserver` never
-listens on. Running the documented reproduction verbatim (`DEBUG=false
-docker compose up -d web` then `./bench.sh`) FATALs immediately on the
-*first* endpoint (`GET /posts`, before the script even reaches
-`/posts/search`) with `HTTP 301 (expected 200)`, exit 1 — see
-`docs/bench/after-http.md`. `bench.sh`'s HTTP-status guard did exactly its
-job: refused to report a 301's timing as a real 200. Reproduced twice,
-cleanly, with `docker exec ... env` checked immediately before and after
-each run to confirm `DEBUG=false` held for the whole invocation.
+**This is correct application behavior, not a regression** — on Fly
+(the deployment target) TLS terminates at the edge and every request
+forwarded to the app carries `X-Forwarded-Proto: https`; without
+`SECURE_SSL_REDIRECT`, a plain-HTTP request could reach the app directly
+and never get upgraded. The benchmark harness, not the app, was out of
+date: `bench.sh` was sending bare `curl` requests with no such header, so
+under `DEBUG=false` every request 301-redirected to a `https://` URL
+`runserver` doesn't speak, and `curl` (correctly) failed with
+`SSL: WRONG_VERSION_NUMBER` when it tried to follow. `bench.sh`'s own
+HTTP-status guard caught the resulting 301 and FATALed rather than report a
+bogus timing.
 
-(Side note on measurement hygiene: this container was also observed several
-times during this session silently drifting back to `DEBUG=true` via some
-container recreation this investigation did not fully root-cause. Every
-number in this document was taken with an explicit `docker exec
-backend-devops-interview-web-1 env | grep DEBUG` check immediately before
-and after capture to rule that out; a couple of earlier capture attempts
-during this session were caught and thrown out this way.)
+**Fix, now committed in `bench.sh`**: every `curl` invocation carries
+`-H "X-Forwarded-Proto: https"`, with a comment pointing at
+`SECURE_PROXY_SSL_HEADER` as the reason. This is not a workaround around
+`SECURE_SSL_REDIRECT` — it supplies the exact header Fly's edge already
+supplies in production, so benchmarking with it is *more* faithful to the
+deployed request path than benchmarking without it. `SECURE_SSL_REDIRECT`
+itself is unchanged and correct; no application code was touched.
 
-**Given `bench.sh` and application code are both out of scope to edit for
-this specific problem, the after-numbers below were captured with a
-supplementary harness (`bench-workaround.sh`, kept outside the repo, not
-committed) that mirrors `bench.sh`'s own `bench()`/`median()` logic and
-search term** with one addition — `-H "X-Forwarded-Proto: https"` on every
-`curl` call — which is precisely the header `core/settings.py`'s own
-`SECURE_PROXY_SSL_HEADER` declares as the trusted proxy signal. This is not
-a bypass of application behavior; it supplies, by hand, the header a real
-front door already supplies in production, so the app under test still runs
-its full request path (all middleware included) with `DEBUG=false`.
+With that fix, `./bench.sh` runs to completion as one invocation, exactly
+as documented in `before-http.md`'s own reproduction steps — see the table
+below and `docs/bench/after-http.md` for the raw, literal capture.
 
-**This should be raised as a bug for a follow-up task**: `HEAD` cannot be
-exercised over plain HTTP locally with `DEBUG=false` at all, for *any*
-endpoint — a real gap in local reproduction of "production-like" behavior,
-unrelated to anything Task 10 measures. Recommended fix: gate
-`SECURE_SSL_REDIRECT` behind its own env var (the same `_env_bool(...)`
-pattern already used for `DEBUG`), defaulting on only when a real proxy
-header scheme is expected.
+**Also verified — before side unaffected.** The pre-migration application
+code (checked out via `git checkout d0224f2 -- blog/ core/`, then restored
+via `git checkout HEAD -- blog/ core/`, confirmed clean with `git status`
+and a passing `pytest blog/tests/test_search.py` both times) has no
+`SECURE_PROXY_SSL_HEADER`/`SECURE_SSL_REDIRECT` at all — grepped, zero
+matches. Measured directly rather than assumed: `/api/posts/search?q=manage`
+against that old code returned HTTP 200 both with and without the header,
+and the timing was unaffected (25.95s/26.33s with the header present vs.
+26.88s/26.99s/27.97s without, in the same run-to-run noise band this
+endpoint already showed at this scale). The header is a no-op against code
+that never reads it, so the same `bench.sh` — header included — is valid
+for benchmarking either side of the migration.
 
 ## Finding 2 — the original benchmark search term did not survive the ILIKE→FTS migration (now corrected)
 
@@ -80,11 +74,11 @@ returns zero results. This also exposed a second, independent problem:
 never fires against the paginated `{"items": [], "count": 0}` envelope, so
 it silently reported the empty-result timing as if it were valid.
 
-Both problems have since been fixed directly in the repo (not by this
-task alone): `bench.sh`'s guard now checks `"count"` in the paginated
-envelope, and the search term has been corrected to **`manage`** — verified
-directly against the full seed to match **identically**, 21,277 published
-posts, under both `ILIKE '%manage%'` and
+Both problems have since been fixed directly in the repo (not by this task
+alone): `bench.sh`'s guard now checks `"count"` in the paginated envelope,
+and the search term has been corrected to **`manage`** — verified directly
+against the full seed to match **identically**, 21,277 published posts,
+under both `ILIKE '%manage%'` and
 `search_vector @@ plainto_tsquery('english', 'manage')` — comparable in
 magnitude to the original 22,309 and, unlike `qui`, a genuine discriminator
 across the migration. (An intermediate attempt used `runs`, which fails in
@@ -94,6 +88,32 @@ the *before* side instead.) `bench.sh`, `bench.sql`,
 correction and its history; see the latter's own post-hoc-correction
 section for the corrected pre-migration search figure, measured against
 the exact `d0224f2` application code.
+
+## Finding 3 (was "concern") — the `DEBUG` drift is explained, not mysterious
+
+During this investigation the web container was observed reverting from
+`DEBUG=false` to `DEBUG=true` on its own between some capture attempts.
+Root cause, confirmed rather than assumed: `docker-compose.yml` sets
+`DEBUG: "${DEBUG:-true}"`. A `docker compose up -d web` issued *without*
+`DEBUG=false` in that specific command's environment — which happened a
+few times mid-investigation, e.g. while poking at the container for
+unrelated checks — recreates the service against the file's default and
+silently flips it back to `true`. Nothing else was involved (no rogue
+background process, no Compose Watch). The fix is procedural, not code: as
+now noted in `before.md`, **every** `docker compose up`/`run` in a
+reproduction must carry `DEBUG=false` itself, not just the first one. Every
+number kept in this document was captured with a `docker exec ... env`
+check immediately before and after to confirm `DEBUG=false` held for the
+whole capture; a few earlier attempts that didn't hold were discarded.
+
+(Separately, and not a blocker: `docker-compose.yml`'s own `web.healthcheck`
+polls `http://localhost:8000/healthz` from inside the container every 10s.
+Under `DEBUG=false` that probe also gets 301-redirected — same root cause
+as Finding 1, just from a caller this task doesn't control — so the
+container shows as `unhealthy` in `docker compose ps` during a `DEBUG=false`
+benchmark run. No `restart:` policy is set, so this doesn't disrupt
+measurement; noting it because a stranger reproducing this will see it too
+and might otherwise wonder if something is wrong.)
 
 ## Dataset / migration sanity check
 
@@ -106,54 +126,70 @@ the exact `d0224f2` application code.
 | `blog_comment`   | 500,000 | yes |
 
 `docker compose run --rm web python manage.py migrate --check` → exit 0, no
-pending migrations. `ruff check .` → all checks passed (no application code
-changes were kept by this task — the pre-migration `blog/`/`core/` checkout
-used for Finding 2's before-figure was restored and verified clean via
-`git status` immediately after use).
+pending migrations. `ruff check .` → all checks passed. No application code
+changes were kept — the pre-migration `blog/`/`core/` checkout used for
+Finding 1 and Finding 2's before-figures was restored and verified clean
+via `git status` and a passing `pytest blog/tests/test_search.py` each
+time it was used.
+
+## Reproduction
+
+```bash
+DEBUG=false docker compose up -d --build
+DEBUG=false docker compose run --rm web python manage.py migrate --check
+
+MAX_TIME=60 RUNS=10 SLOW_RUNS=3 ./bench.sh > docs/bench/after-http.md
+
+docker compose exec -T db psql -U postgres -d backend_devops_interview \
+  < bench.sql > docs/bench/after-plans.txt 2>&1
+```
+
+No header juggling required — `bench.sh` now carries
+`-H "X-Forwarded-Proto: https"` itself (Finding 1), so this reproduces
+cleanly at `HEAD` with no ad hoc flags, exactly like `before-http.md`'s own
+reproduction steps.
 
 ## Before / after table
 
 `Params: MAX_TIME=60s RUNS=10 SLOW_RUNS=3` for both baseline and after,
-matching sample counts (no widened RUNS on the primary comparison). "After"
-column is the supplementary-harness capture (Finding 1) since the literal
-`./bench.sh` cannot complete under `DEBUG=false` on current `HEAD` — see
-`docs/bench/after-http.md` for both the literal FATAL and this table's raw
-capture. The search row's "before" figure is the corrected `manage`-term
-measurement against the pre-migration code (Finding 2), not the original
-`qui`-term `50.091s` figure in `before-http.md`.
+matching sample counts (no widened RUNS on the primary comparison). This
+table is the literal output of one `./bench.sh` invocation — see
+`docs/bench/after-http.md`. The search row's "before" figure is the
+corrected `manage`-term measurement against the pre-migration code
+(Finding 2), not the original `qui`-term `50.091s` figure in
+`before-http.md`.
 
 | endpoint | before median s (samples) | after median s (samples) | multiplier | cause |
 | --- | --- | --- | --- | --- |
 | GET /posts | TIMEOUT (0/3) | 0.045 (3/3) | **≥ ~1300x, a lower bound** — baseline never completed within the 60s bound, so there is no real baseline number to divide by exactly | pagination (`@paginate`, `LIMIT`) + eliminating the `author`/`tags` N+1 (`select_related`/`prefetch_related`) + `post_published_recent_idx` partial index turning `ORDER BY created_at DESC LIMIT 20` into an index scan instead of a full/parallel seq scan |
-| GET /posts/search (`q=manage`) | 26.992 (3/3, measured against pre-migration code, 21,277-row match) | 0.092 (3/3, 21,277-row match) | **~293x** | stored generated `tsvector` (`SearchVector` on `title`/`body`) + `post_search_gin` GIN index replacing the leading-wildcard `ILIKE` (unindexable by any btree index) + the same pagination/N+1 fixes shared with the other list endpoints |
-| GET /posts/by-tag | 21.697 (3/3, baseline's own documented range for this endpoint was 21.5s-50.9s across runs — read this multiplier as an order of magnitude, not a precise ratio) | 0.054 (3/3) | **~402x** | pagination + N+1 elimination (same as `/posts`); the join itself was never the bottleneck (before.md already showed index/bitmap scans here) — the win is entirely from removing the unbounded per-row `author`/`tags` N+1 |
-| GET /posts/1 | 0.104 (10/10) | 0.021 (10/10) | **~5x** | eliminating the per-comment `_serialize_author(c.author)` N+1 (post 1 has 173 comments) via the same `select_related`/`prefetch_related` pattern, plus the atomic `F("view_count") + 1` update replacing a full-row `post.save()` |
-| GET /users/1 | 0.013 (10/10) | 0.015 (10/10) | **no material change** | untouched by the performance track either way; both figures sit inside the same noise band for a serial single-request harness at the ~13-21ms floor (see "Noise floor" below) |
-| GET /users/find | 0.014 (10/10) | 0.015 (10/10) | **no material change** | same as above; the new `email` index is real (see query-plan evidence) but has no visible HTTP-level effect at this scale — `blog_user` is 1,000 rows either way |
+| GET /posts/search (`q=manage`) | 26.992 (3/3, measured against pre-migration code, 21,277-row match) | 0.095 (3/3, 21,277-row match) | **~284x** | stored generated `tsvector` (`SearchVector` on `title`/`body`) + `post_search_gin` GIN index replacing the leading-wildcard `ILIKE` (unindexable by any btree index) + the same pagination/N+1 fixes shared with the other list endpoints |
+| GET /posts/by-tag | 21.697 (3/3, baseline's own documented range for this endpoint was 21.5s-50.9s across runs — read this multiplier as an order of magnitude, not a precise ratio) | 0.060 (3/3) | **~362x** | pagination + N+1 elimination (same as `/posts`); the join itself was never the bottleneck (before.md already showed index/bitmap scans here) — the win is entirely from removing the unbounded per-row `author`/`tags` N+1 |
+| GET /posts/1 | 0.104 (10/10) | 0.023 (10/10) | **~4.5x** | eliminating the per-comment `_serialize_author(c.author)` N+1 (post 1 has 173 comments) via the same `select_related`/`prefetch_related` pattern, plus the atomic `F("view_count") + 1` update replacing a full-row `post.save()` |
+| GET /users/1 | 0.013 (10/10) | 0.017 (10/10) | **no material change** | untouched by the performance track either way; both figures sit inside the same noise band for a serial single-request harness at the ~14-19ms floor (see "Noise floor" below) |
+| GET /users/find | 0.014 (10/10) | 0.016 (10/10) | **no material change** | same as above; the new `email` index is real (see query-plan evidence) but has no visible HTTP-level effect at this scale — `blog_user` is 1,000 rows either way |
 
 ## Noise floor on the cheap endpoints (honesty requirement)
 
 The primary-table figures for `/users/1` and `/users/find` are single
-3-or-10-sample captures. To check whether the small before/after delta was
-real, both were resampled 15-20 times each (with the header workaround) at
-three separate points during this session:
+10-sample captures. To check whether the small before/after delta is real,
+both were resampled 15 times each at multiple points during this session:
 
-| endpoint | resample 1 | resample 2 | resample 3 |
+| endpoint | resample A | resample B | resample C (most recent) |
 | --- | --- | --- | --- |
-| `/users/1` | min 0.019 / med 0.021 / max 0.024 | min 0.014 / med 0.014 / max 0.021 | (10/10 in primary table: 0.015) |
-| `/users/find` | min 0.019 / med 0.020 / max 0.028 | min 0.015 / med 0.015 / max 0.020 | (10/10 in primary table: 0.015) |
+| `/users/1` | min 0.019 / med 0.021 / max 0.024 | min 0.014 / med 0.014 / max 0.021 | min 0.014 / med 0.015 / max 0.019 |
+| `/users/find` | min 0.019 / med 0.020 / max 0.028 | min 0.015 / med 0.015 / max 0.020 | min 0.015 / med 0.016 / max 0.027 |
+| `/posts/1` (for contrast) | — | — | min 0.020 / med 0.022 / max 0.030 |
 
-The spread across resamples (0.014-0.024s) straddles the baseline's
-0.013-0.014s on both sides — sometimes reading a little faster, sometimes a
-little slower, depending on whatever else the container/host was doing at
-that instant. **No confirmed regression** — the earlier working draft of
-this document reported these as a "confirmed 30-46% slowdown" from one
-unlucky sample; that claim did not survive resampling and has been
-retracted here rather than left in. What is real: `/posts/1` moved from
-0.104s to ~0.021-0.026s across every sample taken, a genuine, repeatable win
-that is well outside this noise band — so the noise on the two untouched
-user endpoints is not masking anything about the endpoints the performance
-track actually changed.
+The spread across resamples (0.014-0.028s) straddles the baseline's
+0.013-0.014s on both sides — sometimes a little faster, sometimes a little
+slower, depending on whatever else the container/host was doing at that
+instant. **No confirmed regression** — an early working draft of this
+document reported these as a "confirmed 30-46% slowdown" from one unlucky
+sample; that claim did not survive resampling and was retracted rather than
+left in. What is real: `/posts/1` moved from 0.104s to ~0.020-0.026s across
+every sample taken, a genuine, repeatable win well outside this noise
+band — so the noise on the two untouched user endpoints isn't masking
+anything about the endpoints the performance track actually changed.
 
 ## Query-plan evidence (`bench.sql` via `psql`, full output: `docs/bench/after-plans.txt`)
 
@@ -163,12 +199,12 @@ Scan` anymore (the sole remaining `Seq Scan` in the whole file is on
 
 1. **List** (`WHERE is_published ORDER BY created_at DESC LIMIT 20`):
    `Parallel Seq Scan` (before, 141.776ms cold-cache) → `Index Scan using
-   post_published_recent_idx` (after, 0.137ms). The partial index on
+   post_published_recent_idx` (after, 0.159ms). The partial index on
    `(is_published, created_at)` lets Postgres walk the index in order and
    stop after 20 rows instead of scanning the table.
 2. **Search, old shape, `manage`** (`ILIKE '%manage%'`, kept in `bench.sql`
    deliberately for comparison): also now `Index Scan using
-   post_published_recent_idx` (0.961ms), filtering by `ILIKE` per row after
+   post_published_recent_idx` (0.622ms), filtering by `ILIKE` per row after
    the index scan. Worth calling out: **the same list-pagination index
    incidentally speeds up the old `ILIKE` query shape too** — this specific
    number is not FTS doing the work, it's LIMIT-with-early-termination,
@@ -180,7 +216,7 @@ Scan` anymore (the sole remaining `Seq Scan` in the whole file is on
 3. **Search, new shape, `manage`** (real 21,277-row match, comparable
    magnitude to the baseline's 22,309): `Bitmap Index Scan on
    post_search_gin` → `Bitmap Heap Scan` → top-N heapsort for the `LIMIT
-   20` — 67.808ms end-to-end. This is the real FTS-vs-ILIKE comparison at
+   20` — 56.958ms end-to-end. This is the real FTS-vs-ILIKE comparison at
    the SQL level for a genuinely large match set going through the new
    code path (as opposed to #2 above, which shows the old code path
    incidentally benefiting from an unrelated index).
@@ -188,16 +224,17 @@ Scan` anymore (the sole remaining `Seq Scan` in the whole file is on
    already showed no seq scan here (93.481ms cold via index/bitmap scans).
    After: `Index Scan using post_published_recent_idx` feeding a `Nested
    Loop` with an `Index Only Scan` on the `post_tags` unique index —
-   1.204ms, ~77x faster than the cold-cache baseline figure. The HTTP-level
-   21-50s cost was always the app-layer N+1, never this query (unchanged
-   conclusion from before.md, now with a much faster base query too).
+   0.630ms, ~148x faster than the cold-cache baseline figure. The
+   HTTP-level 21-50s cost was always the app-layer N+1, never this query
+   (unchanged conclusion from before.md, now with a much faster base query
+   too).
 5. **Comments for post 1**: `Bitmap Heap Scan` via the FK index (before,
    30.416ms cold) → `Bitmap Index Scan on comment_post_created_idx` (after,
-   2.086ms) — the new composite `(post_id, created_at)` index avoids a
+   0.704ms) — the new composite `(post_id, created_at)` index avoids a
    separate sort step for the `ORDER BY created_at LIMIT 50`.
 6. **User by email**: `Seq Scan on blog_user`, `Rows Removed by Filter:
    999` (before, 0.627ms cold) → `Index Scan using
-   blog_user_email_8f71103d_like` (after, 0.052ms). Confirms the new
+   blog_user_email_8f71103d_like` (after, 0.024ms). Confirms the new
    `email` index; as before.md noted, this was only invisible at 1,000
    rows and stays fast now regardless of scale — this is the query-level
    proof behind an index that, per the HTTP table above, made no visible
@@ -216,13 +253,6 @@ Scan` anymore (the sole remaining `Seq Scan` in the whole file is on
   requests. A single after-sample per endpoint (3 for the slow ones) should
   be read against that documented spread and against orders of magnitude,
   not treated as an exact number.
-- The after-numbers in the primary table are from a supplementary harness,
-  not the literal committed `bench.sh` (Finding 1) — a deviation from "one
-  single `./bench.sh` invocation," made necessary by an unrelated
-  regression this task is not permitted to fix in application code.
-  `bench.sh`'s literal output (a clean, immediate FATAL) is preserved
-  unedited in `docs/bench/after-http.md` as the authoritative record of
-  what the committed script actually does today.
 - The search row's "before" figure required checking out pre-migration
   `blog/`/`core/` code (Finding 2) — the database it ran against already
   has the new indexes and the `search_vector` column, which is immaterial
