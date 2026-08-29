@@ -9,16 +9,16 @@ set -euo pipefail
 
 BASE="${1:-http://localhost:8000}"
 RUNS="${RUNS:-10}"
-# Ceiling per request. /posts and /posts/search are unpaginated + N+1 in their
-# current, unfixed state and can genuinely hang; this bound turns that into a
-# recorded timeout instead of a stuck harness.
+# Ceiling per request. /posts, /posts/search and /posts/by-tag are all
+# unpaginated + N+1 in their current, unfixed state and can genuinely hang;
+# this bound turns that into a recorded timeout instead of a stuck harness.
 MAX_TIME="${MAX_TIME:-60}"
 # Slow, known-pathological endpoints get fewer samples so the whole harness
 # stays runnable in minutes rather than tens of minutes. Override via env.
 SLOW_RUNS="${SLOW_RUNS:-3}"
 
 median() {
-  sort -n | awk '{v[NR]=$1} END {if (NR==0) {print "n/a"; exit} print (NR%2) ? v[(NR+1)/2] : (v[NR/2]+v[NR/2+1])/2}'
+  sort -n | awk '{v[NR]=$1} END {print (NR%2) ? v[(NR+1)/2] : (v[NR/2]+v[NR/2+1])/2}'
 }
 
 # Prints one table row. Tracks how many of the attempted samples actually
