@@ -20,6 +20,6 @@ def user(db):
 def test_search_stems_and_matches_title(client, user):
     Post.objects.create(author=user, title="Running fast", body="body")
 
-    response = client.get("/api/posts/search?q=run")
+    response = client.get("/api/posts/search?q=runs")
 
     assert [p["title"] for p in response.json()["items"]] == ["Running fast"]
