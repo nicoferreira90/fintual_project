@@ -1,5 +1,7 @@
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.db import models
-from django.db.models import Q
+from django.db.models import GeneratedField, Q
 from django.utils import timezone
 
 
@@ -33,6 +35,16 @@ class Post(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     tags = models.ManyToManyField(Tag, related_name="posts", blank=True)
 
+    # Stored generated column: Postgres keeps it in sync, no trigger and no
+    # save() override. The explicit config is load-bearing — to_tsvector is only
+    # IMMUTABLE in its two-argument form, and a generated column requires that.
+    search_vector = GeneratedField(
+        expression=SearchVector("title", weight="A", config="english")
+        + SearchVector("body", weight="B", config="english"),
+        output_field=SearchVectorField(),
+        db_persist=True,
+    )
+
     class Meta:
         indexes = [
             # Partial: the list endpoint only ever reads published rows, so the
@@ -42,6 +54,7 @@ class Post(models.Model):
                 condition=Q(is_published=True),
                 name="post_published_recent_idx",
             ),
+            GinIndex(fields=["search_vector"], name="post_search_gin"),
         ]
 
     def __str__(self) -> str:

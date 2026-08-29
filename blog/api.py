@@ -1,4 +1,5 @@
-from django.db.models import Q
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from ninja import Router
 from ninja.pagination import paginate
@@ -51,10 +52,12 @@ def posts_by_tag(request, slug: str):
 @router.get("/posts/search", response=list[PostListOut])
 @paginate
 def search_posts(request, q: str):
+    query = SearchQuery(q, config="english")
     return (
         _post_list_qs()
-        .filter(Q(title__icontains=q) | Q(body__icontains=q), is_published=True)
-        .order_by("-created_at")
+        .filter(search_vector=query, is_published=True)
+        .annotate(rank=SearchRank(F("search_vector"), query))
+        .order_by("-rank", "-created_at")
     )
 
 
