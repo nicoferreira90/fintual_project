@@ -38,9 +38,12 @@ median() {
 # HTTP 200 -- a 404/500 fails the run loudly rather than being silently
 # timed as if it were a real answer (a fast 404 would otherwise look exactly
 # like a fast success). Pass "nonempty" as the 4th arg to additionally fail
-# loudly if a 200 response body is an empty JSON array `[]` -- guards
-# against silently re-benchmarking "how fast is an empty result", which is
-# exactly how q=python produced a meaningless 0.181s (see before.md).
+# loudly if a 200 response reports zero results -- guards against silently
+# re-benchmarking "how fast is an empty result", which is exactly how
+# q=python produced a meaningless 0.181s (see before.md). Pagination wraps
+# results in {"items":[...],"count":N}, so an empty result is detected via
+# "count":0 in the body, not via the old bare-array literal "[]" (which the
+# envelope can no longer produce -- that check stopped firing silently).
 bench() {
   local name="$1" path="$2" runs="${3:-$RUNS}" require_nonempty="${4:-}"
   local times=() ok=0 attempted=0 resp code t out
@@ -57,7 +60,7 @@ bench() {
       fi
       times+=("$t")
       ok=$((ok + 1))
-      if [ -n "$require_nonempty" ] && [ "$(cat "$out")" = "[]" ]; then
+      if [ -n "$require_nonempty" ] && grep -qE '"count":[[:space:]]*0([^0-9]|$)' "$out"; then
         rm -f "$out"
         echo "FATAL: $name returned zero results -- the hardcoded search term no longer matches seeded data. Fix bench.sh, don't report this timing." >&2
         exit 1
@@ -77,11 +80,17 @@ echo
 echo "| endpoint                     | median s | samples   |"
 echo "| ---------------------------- | -------- | --------- |"
 bench "GET /posts"          "/api/posts"                                 "$SLOW_RUNS"
-# "qui" is a lorem-ipsum token that Faker's text() actually generates (unlike
-# "python", which never appears in body text -- see before.md's footnote).
-# Verified against the full seed: 22,309 published posts match. Hardcoded,
-# not derived at runtime, so before/after runs search for the same thing.
-bench "GET /posts/search"   "/api/posts/search?q=qui"                    "$SLOW_RUNS" nonempty
+# "runs" stems to "run" under the FTS config the search endpoint now queries
+# against (search_vector @@ plainto_tsquery('english', ...)). "qui" -- the
+# term this used before the ILIKE-to-FTS migration -- never appears as a
+# standalone lexeme in the seeded corpus (only as a substring inside other
+# words, which ILIKE matched but tsvector tokenization does not), so it went
+# silently to zero real matches once the underlying query changed; the "[]"
+# empty-result guard predated pagination and could never catch it either.
+# Verified against the full seed: 8,246 published posts match "runs" via
+# FTS. Hardcoded, not derived at runtime, so before/after runs search for
+# the same thing.
+bench "GET /posts/search"   "/api/posts/search?q=runs"                   "$SLOW_RUNS" nonempty
 bench "GET /posts/by-tag"   "/api/posts/by-tag/python"                   "$SLOW_RUNS"
 bench "GET /posts/1"        "/api/posts/1"
 bench "GET /users/1"        "/api/users/1"
