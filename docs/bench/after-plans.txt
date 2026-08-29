@@ -1,0 +1,114 @@
+Timing is on.
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.29..22.89 rows=20 width=668) (actual time=0.024..0.110 rows=20 loops=1)
+   Buffers: shared hit=13 read=9
+   ->  Index Scan using post_published_recent_idx on blog_post  (cost=0.29..101761.54 rows=90084 width=668) (actual time=0.023..0.108 rows=20 loops=1)
+         Buffers: shared hit=13 read=9
+ Planning:
+   Buffers: shared hit=181 read=12
+ Planning Time: 1.031 ms
+ Execution Time: 0.137 ms
+(8 rows)
+
+Time: 2.308 ms
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.29..107.34 rows=20 width=668) (actual time=0.053..0.931 rows=20 loops=1)
+   Buffers: shared hit=69 read=14
+   ->  Index Scan using post_published_recent_idx on blog_post  (cost=0.29..102211.96 rows=19097 width=668) (actual time=0.052..0.927 rows=20 loops=1)
+         Filter: (((title)::text ~~* '%manage%'::text) OR (body ~~* '%manage%'::text))
+         Rows Removed by Filter: 61
+         Buffers: shared hit=69 read=14
+ Planning Time: 1.184 ms
+ Execution Time: 0.961 ms
+(8 rows)
+
+Time: 2.594 ms
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=1840.94..1840.99 rows=20 width=668) (actual time=67.614..67.621 rows=20 loops=1)
+   Buffers: shared hit=6359 read=10062
+   ->  Sort  (cost=1840.94..1842.06 rows=450 width=668) (actual time=67.612..67.618 rows=20 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: top-N heapsort  Memory: 93kB
+         Buffers: shared hit=6359 read=10062
+         ->  Bitmap Heap Scan on blog_post  (cost=48.92..1828.97 rows=450 width=668) (actual time=7.143..62.612 rows=21277 loops=1)
+               Recheck Cond: (search_vector @@ '''manag'''::tsquery)
+               Filter: is_published
+               Rows Removed by Filter: 2352
+               Heap Blocks: exact=16403
+               Buffers: shared hit=6356 read=10062
+               ->  Bitmap Index Scan on post_search_gin  (cost=0.00..48.80 rows=500 width=0) (actual time=4.018..4.018 rows=23629 loops=1)
+                     Index Cond: (search_vector @@ '''manag'''::tsquery)
+                     Buffers: shared hit=2 read=13
+ Planning:
+   Buffers: shared hit=11 read=18
+ Planning Time: 0.761 ms
+ Execution Time: 67.808 ms
+(19 rows)
+
+Time: 69.257 ms
+                                                                                       QUERY PLAN                                                                                        
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.71..1133.11 rows=20 width=668) (actual time=0.111..1.146 rows=20 loops=1)
+   Buffers: shared hit=309 read=103
+   ->  Nested Loop  (cost=0.71..154799.09 rows=2734 width=668) (actual time=0.110..1.140 rows=20 loops=1)
+         Join Filter: (pt.tag_id = t.id)
+         Rows Removed by Join Filter: 226
+         Buffers: shared hit=309 read=103
+         ->  Nested Loop  (cost=0.71..151516.75 rows=218689 width=676) (actual time=0.068..1.049 rows=246 loops=1)
+               Buffers: shared hit=308 read=103
+               ->  Index Scan using post_published_recent_idx on blog_post p  (cost=0.29..101761.54 rows=90084 width=668) (actual time=0.017..0.186 rows=102 loops=1)
+                     Buffers: shared hit=96 read=8
+               ->  Index Only Scan using blog_post_tags_post_id_tag_id_4925ec37_uniq on blog_post_tags pt  (cost=0.42..0.52 rows=3 width=16) (actual time=0.007..0.007 rows=2 loops=102)
+                     Index Cond: (post_id = p.id)
+                     Heap Fetches: 0
+                     Buffers: shared hit=212 read=95
+         ->  Materialize  (cost=0.00..2.00 rows=1 width=8) (actual time=0.000..0.000 rows=1 loops=246)
+               Buffers: shared hit=1
+               ->  Seq Scan on blog_tag t  (cost=0.00..2.00 rows=1 width=8) (actual time=0.009..0.013 rows=1 loops=1)
+                     Filter: ((slug)::text = 'python'::text)
+                     Rows Removed by Filter: 49
+                     Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=282 read=12
+ Planning Time: 9.869 ms
+ Execution Time: 1.204 ms
+(24 rows)
+
+Time: 13.288 ms
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=51.68..51.71 rows=12 width=144) (actual time=2.024..2.033 rows=50 loops=1)
+   Buffers: shared hit=3 read=175
+   ->  Sort  (cost=51.68..51.71 rows=12 width=144) (actual time=2.022..2.027 rows=50 loops=1)
+         Sort Key: created_at
+         Sort Method: top-N heapsort  Memory: 45kB
+         Buffers: shared hit=3 read=175
+         ->  Bitmap Heap Scan on blog_comment  (cost=4.52..51.47 rows=12 width=144) (actual time=0.148..1.932 rows=173 loops=1)
+               Recheck Cond: (post_id = 1)
+               Heap Blocks: exact=172
+               Buffers: shared hit=3 read=175
+               ->  Bitmap Index Scan on comment_post_created_idx  (cost=0.00..4.51 rows=12 width=0) (actual time=0.096..0.096 rows=173 loops=1)
+                     Index Cond: (post_id = 1)
+                     Buffers: shared hit=3 read=3
+ Planning:
+   Buffers: shared hit=78 read=5
+ Planning Time: 0.591 ms
+ Execution Time: 2.086 ms
+(17 rows)
+
+Time: 3.278 ms
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using blog_user_email_8f71103d_like on blog_user  (cost=0.28..8.29 rows=1 width=99) (actual time=0.029..0.030 rows=1 loops=1)
+   Index Cond: ((email)::text = 'user00001@example.com'::text)
+   Buffers: shared read=3
+ Planning:
+   Buffers: shared hit=78 read=7
+ Planning Time: 0.841 ms
+ Execution Time: 0.052 ms
+(7 rows)
+
+Time: 1.614 ms

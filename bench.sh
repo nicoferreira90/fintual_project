@@ -80,17 +80,22 @@ echo
 echo "| endpoint                     | median s | samples   |"
 echo "| ---------------------------- | -------- | --------- |"
 bench "GET /posts"          "/api/posts"                                 "$SLOW_RUNS"
-# "runs" stems to "run" under the FTS config the search endpoint now queries
-# against (search_vector @@ plainto_tsquery('english', ...)). "qui" -- the
-# term this used before the ILIKE-to-FTS migration -- never appears as a
-# standalone lexeme in the seeded corpus (only as a substring inside other
-# words, which ILIKE matched but tsvector tokenization does not), so it went
-# silently to zero real matches once the underlying query changed; the "[]"
-# empty-result guard predated pagination and could never catch it either.
-# Verified against the full seed: 8,246 published posts match "runs" via
-# FTS. Hardcoded, not derived at runtime, so before/after runs search for
-# the same thing.
-bench "GET /posts/search"   "/api/posts/search?q=runs"                   "$SLOW_RUNS" nonempty
+# "manage" is a genuine whole-word match under BOTH query shapes: it's a real
+# English word in the seeded corpus (the seed's body text is
+# business-jargon-style prose, not lorem ipsum), so it matches identically
+# under ILIKE substring search and under FTS lexeme search (both count
+# 21,277 published posts -- verified directly against the full seed). Earlier
+# terms both failed this bar: "qui" (pre-migration) matched 22,309 rows via
+# ILIKE but 0 via FTS -- it only ever occurred as a substring inside longer
+# words ("require", "acquire", "quick"), never as a standalone lexeme, so it
+# silently went to zero real search work once the query changed to FTS, and
+# the pre-pagination "[]" empty-result guard could never catch it. "runs" (a
+# later, also-wrong attempt) matched 0 rows via ILIKE and ~9k via FTS -- the
+# mirror-image mistake, wrong for the *before* side instead. "manage"
+# matches the same rows either way, so it's a valid discriminator across the
+# ILIKE-to-FTS migration. Hardcoded, not derived at runtime, so before/after
+# runs search for the same thing.
+bench "GET /posts/search"   "/api/posts/search?q=manage"                  "$SLOW_RUNS" nonempty
 bench "GET /posts/by-tag"   "/api/posts/by-tag/python"                   "$SLOW_RUNS"
 bench "GET /posts/1"        "/api/posts/1"
 bench "GET /users/1"        "/api/users/1"

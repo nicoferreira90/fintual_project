@@ -276,3 +276,18 @@ docker compose stop web
 `web.environment` reads `DEBUG: "${DEBUG:-true}"` (Ruling 9), the same
 pattern as `${DB_PORT:-5432}` already in the file. No `-e` flag, no
 `docker compose run` workaround, no edit to the committed file.
+
+## Post-hoc correction (2026-08-29, found during Task 10)
+
+The search term `qui` used above is a defective before/after comparison
+term once search moves from `ILIKE` to full-text search: it matched 22,309
+rows as an `ILIKE` *substring* (inside words like "require", "acquire",
+"quick") but is not a standalone lexeme anywhere in the corpus, so a
+whole-word FTS query for it returns 0 rows. The corrected term is `manage`
+(21,277 rows, identically, under both `ILIKE` and FTS). The table above is
+left unedited as the genuine, single-invocation record it always was — see
+`docs/bench/before-http.md`'s own post-hoc correction section for the full
+explanation and the corrected `manage`-term search figure (**26.992s,
+3/3**, measured against this exact pre-migration code via `git checkout
+d0224f2 -- blog/ core/`, restored afterward), which is the number Task 10's
+after-comparison actually uses for `/posts/search`.
