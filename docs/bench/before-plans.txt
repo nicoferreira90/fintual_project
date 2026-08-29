@@ -1,112 +1,118 @@
 Timing is on.
-                                                                QUERY PLAN                                                                 
--------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=10785.55..10787.89 rows=20 width=636) (actual time=15.758..18.232 rows=20 loops=1)
-   Buffers: shared hit=8485
-   ->  Gather Merge  (cost=10785.55..19536.16 rows=75000 width=636) (actual time=15.756..18.228 rows=20 loops=1)
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=10785.55..10787.89 rows=20 width=636) (actual time=140.034..141.705 rows=20 loops=1)
+   Buffers: shared hit=114 read=8371 dirtied=1
+   ->  Gather Merge  (cost=10785.55..19536.16 rows=75000 width=636) (actual time=140.033..141.702 rows=20 loops=1)
          Workers Planned: 2
          Workers Launched: 2
-         Buffers: shared hit=8485
-         ->  Sort  (cost=9785.53..9879.28 rows=37500 width=636) (actual time=13.898..13.901 rows=16 loops=3)
+         Buffers: shared hit=114 read=8371 dirtied=1
+         ->  Sort  (cost=9785.53..9879.28 rows=37500 width=636) (actual time=137.341..137.343 rows=14 loops=3)
                Sort Key: created_at DESC
                Sort Method: top-N heapsort  Memory: 64kB
-               Buffers: shared hit=8485
-               Worker 0:  Sort Method: top-N heapsort  Memory: 57kB
-               Worker 1:  Sort Method: top-N heapsort  Memory: 61kB
-               ->  Parallel Seq Scan on blog_post  (cost=0.00..8787.67 rows=37500 width=636) (actual time=0.010..9.460 rows=30024 loops=3)
+               Buffers: shared hit=114 read=8371 dirtied=1
+               Worker 0:  Sort Method: top-N heapsort  Memory: 60kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 59kB
+               ->  Parallel Seq Scan on blog_post  (cost=0.00..8787.67 rows=37500 width=636) (actual time=0.138..133.239 rows=30024 loops=3)
                      Filter: is_published
                      Rows Removed by Filter: 3309
-                     Buffers: shared hit=8371
+                     Buffers: shared read=8371 dirtied=1
  Planning:
-   Buffers: shared hit=153
- Planning Time: 0.674 ms
- Execution Time: 18.302 ms
+   Buffers: shared hit=140 read=13
+ Planning Time: 2.813 ms
+ Execution Time: 141.776 ms
 (20 rows)
 
-Time: 20.235 ms
-                                                       QUERY PLAN                                                        
--------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=9871.38..9871.42 rows=18 width=636) (actual time=446.436..446.438 rows=0 loops=1)
-   Buffers: shared hit=8371
-   ->  Sort  (cost=9871.38..9871.42 rows=18 width=636) (actual time=446.432..446.433 rows=0 loops=1)
-         Sort Key: created_at DESC
-         Sort Method: quicksort  Memory: 25kB
-         Buffers: shared hit=8371
-         ->  Seq Scan on blog_post  (cost=0.00..9871.00 rows=18 width=636) (actual time=446.421..446.422 rows=0 loops=1)
-               Filter: (is_published AND (((title)::text ~~* '%python%'::text) OR (body ~~* '%python%'::text)))
-               Rows Removed by Filter: 100000
-               Buffers: shared hit=8371
- Planning Time: 1.510 ms
- Execution Time: 446.508 ms
-(12 rows)
+Time: 146.262 ms
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=10254.88..10257.22 rows=20 width=636) (actual time=179.450..182.951 rows=20 loops=1)
+   Buffers: shared hit=210 read=8275
+   ->  Gather Merge  (cost=10254.88..12524.91 rows=19456 width=636) (actual time=179.448..182.947 rows=20 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=210 read=8275
+         ->  Sort  (cost=9254.86..9279.18 rows=9728 width=636) (actual time=177.043..177.046 rows=16 loops=3)
+               Sort Key: created_at DESC
+               Sort Method: top-N heapsort  Memory: 58kB
+               Buffers: shared hit=210 read=8275
+               Worker 0:  Sort Method: top-N heapsort  Memory: 60kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 57kB
+               ->  Parallel Seq Scan on blog_post  (cost=0.00..8996.00 rows=9728 width=636) (actual time=0.054..175.399 rows=7436 loops=3)
+                     Filter: (is_published AND (((title)::text ~~* '%qui%'::text) OR (body ~~* '%qui%'::text)))
+                     Rows Removed by Filter: 25897
+                     Buffers: shared hit=96 read=8275
+ Planning Time: 1.027 ms
+ Execution Time: 183.007 ms
+(18 rows)
 
-Time: 448.672 ms
+Time: 185.063 ms
                                                                               QUERY PLAN                                                                               
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=2205.49..2205.54 rows=20 width=636) (actual time=31.052..31.057 rows=20 loops=1)
-   Buffers: shared hit=57477
-   ->  Sort  (cost=2205.49..2207.76 rows=911 width=636) (actual time=31.050..31.054 rows=20 loops=1)
+ Limit  (cost=2205.49..2205.54 rows=20 width=636) (actual time=93.361..93.366 rows=20 loops=1)
+   Buffers: shared hit=48151 read=9326
+   ->  Sort  (cost=2205.49..2207.76 rows=911 width=636) (actual time=93.360..93.363 rows=20 loops=1)
          Sort Key: p.created_at DESC
          Sort Method: top-N heapsort  Memory: 59kB
-         Buffers: shared hit=57477
-         ->  Nested Loop  (cost=58.40..2181.25 rows=911 width=636) (actual time=0.693..27.407 rows=16803 loops=1)
-               Buffers: shared hit=57477
-               ->  Nested Loop  (cost=58.11..1723.47 rows=1012 width=8) (actual time=0.685..5.906 rows=18637 loops=1)
-                     Buffers: shared hit=1566
-                     ->  Index Scan using blog_tag_slug_01068d0e_like on blog_tag t  (cost=0.14..8.16 rows=1 width=8) (actual time=0.015..0.016 rows=1 loops=1)
+         Buffers: shared hit=48151 read=9326
+         ->  Nested Loop  (cost=58.40..2181.25 rows=911 width=636) (actual time=4.313..88.832 rows=16803 loops=1)
+               Buffers: shared hit=48151 read=9326
+               ->  Nested Loop  (cost=58.11..1723.47 rows=1012 width=8) (actual time=4.288..22.615 rows=18637 loops=1)
+                     Buffers: shared read=1566
+                     ->  Index Scan using blog_tag_slug_01068d0e_like on blog_tag t  (cost=0.14..8.16 rows=1 width=8) (actual time=0.241..0.242 rows=1 loops=1)
                            Index Cond: ((slug)::text = 'python'::text)
-                           Buffers: shared hit=2
-                     ->  Bitmap Heap Scan on blog_post_tags pt  (cost=57.96..1666.71 rows=4860 width=16) (actual time=0.667..4.510 rows=18637 loops=1)
+                           Buffers: shared read=2
+                     ->  Bitmap Heap Scan on blog_post_tags pt  (cost=57.96..1666.71 rows=4860 width=16) (actual time=4.041..20.370 rows=18637 loops=1)
                            Recheck Cond: (tag_id = t.id)
                            Heap Blocks: exact=1548
-                           Buffers: shared hit=1564
-                           ->  Bitmap Index Scan on blog_post_tags_tag_id_0875c551  (cost=0.00..56.74 rows=4860 width=0) (actual time=0.522..0.522 rows=18637 loops=1)
+                           Buffers: shared read=1564
+                           ->  Bitmap Index Scan on blog_post_tags_tag_id_0875c551  (cost=0.00..56.74 rows=4860 width=0) (actual time=3.648..3.648 rows=18637 loops=1)
                                  Index Cond: (tag_id = t.id)
-                                 Buffers: shared hit=16
-               ->  Index Scan using blog_post_pkey on blog_post p  (cost=0.29..0.45 rows=1 width=636) (actual time=0.001..0.001 rows=1 loops=18637)
+                                 Buffers: shared read=16
+               ->  Index Scan using blog_post_pkey on blog_post p  (cost=0.29..0.45 rows=1 width=636) (actual time=0.003..0.003 rows=1 loops=18637)
                      Index Cond: (id = pt.post_id)
                      Filter: is_published
                      Rows Removed by Filter: 0
-                     Buffers: shared hit=55911
+                     Buffers: shared hit=48151 read=7760
  Planning:
-   Buffers: shared hit=289
- Planning Time: 1.348 ms
- Execution Time: 31.137 ms
+   Buffers: shared hit=268 read=21
+ Planning Time: 8.491 ms
+ Execution Time: 93.481 ms
 (29 rows)
 
-Time: 33.733 ms
+Time: 104.367 ms
                                                                      QUERY PLAN                                                                      
 -----------------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=51.68..51.71 rows=12 width=144) (actual time=0.474..0.481 rows=50 loops=1)
-   Buffers: shared hit=178
-   ->  Sort  (cost=51.68..51.71 rows=12 width=144) (actual time=0.473..0.476 rows=50 loops=1)
+ Limit  (cost=51.68..51.71 rows=12 width=144) (actual time=30.372..30.380 rows=50 loops=1)
+   Buffers: shared hit=3 read=175
+   ->  Sort  (cost=51.68..51.71 rows=12 width=144) (actual time=30.371..30.376 rows=50 loops=1)
          Sort Key: created_at
          Sort Method: top-N heapsort  Memory: 45kB
-         Buffers: shared hit=178
-         ->  Bitmap Heap Scan on blog_comment  (cost=4.52..51.47 rows=12 width=144) (actual time=0.059..0.427 rows=173 loops=1)
+         Buffers: shared hit=3 read=175
+         ->  Bitmap Heap Scan on blog_comment  (cost=4.52..51.47 rows=12 width=144) (actual time=0.738..30.178 rows=173 loops=1)
                Recheck Cond: (post_id = 1)
                Heap Blocks: exact=172
-               Buffers: shared hit=178
-               ->  Bitmap Index Scan on blog_comment_post_id_580e96ef  (cost=0.00..4.51 rows=12 width=0) (actual time=0.039..0.039 rows=173 loops=1)
+               Buffers: shared hit=3 read=175
+               ->  Bitmap Index Scan on blog_comment_post_id_580e96ef  (cost=0.00..4.51 rows=12 width=0) (actual time=0.467..0.467 rows=173 loops=1)
                      Index Cond: (post_id = 1)
-                     Buffers: shared hit=6
+                     Buffers: shared hit=3 read=3
  Planning:
-   Buffers: shared hit=68
- Planning Time: 0.389 ms
- Execution Time: 0.521 ms
+   Buffers: shared hit=63 read=5
+ Planning Time: 1.366 ms
+ Execution Time: 30.416 ms
 (17 rows)
 
-Time: 1.439 ms
+Time: 32.182 ms
                                              QUERY PLAN                                              
 -----------------------------------------------------------------------------------------------------
- Seq Scan on blog_user  (cost=0.00..29.50 rows=1 width=99) (actual time=0.012..0.160 rows=1 loops=1)
+ Seq Scan on blog_user  (cost=0.00..29.50 rows=1 width=99) (actual time=0.015..0.611 rows=1 loops=1)
    Filter: ((email)::text = 'user00001@example.com'::text)
    Rows Removed by Filter: 999
-   Buffers: shared hit=17
+   Buffers: shared hit=1 read=16
  Planning:
-   Buffers: shared hit=61
- Planning Time: 0.501 ms
- Execution Time: 0.174 ms
+   Buffers: shared hit=59 read=2
+ Planning Time: 1.783 ms
+ Execution Time: 0.627 ms
 (8 rows)
 
-Time: 1.023 ms
+Time: 2.641 ms

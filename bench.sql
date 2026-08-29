@@ -5,7 +5,7 @@ SELECT * FROM blog_post WHERE is_published ORDER BY created_at DESC LIMIT 20;
 
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT * FROM blog_post
-WHERE is_published AND (title ILIKE '%python%' OR body ILIKE '%python%')
+WHERE is_published AND (title ILIKE '%qui%' OR body ILIKE '%qui%')
 ORDER BY created_at DESC LIMIT 20;
 
 EXPLAIN (ANALYZE, BUFFERS)
