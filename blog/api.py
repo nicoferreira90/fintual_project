@@ -1,6 +1,7 @@
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from ninja import Router
+from ninja.pagination import paginate
 
 from blog.models import Comment, Post, Tag, User
 from blog.schemas import (
@@ -28,37 +29,33 @@ def _serialize_tag(tag: Tag) -> dict:
     return {"id": tag.id, "name": tag.name, "slug": tag.slug}
 
 
-def _serialize_post_list(post: Post) -> dict:
-    return {
-        "id": post.id,
-        "title": post.title,
-        "author": _serialize_author(post.author),
-        "tags": [_serialize_tag(t) for t in post.tags.all()],
-        "view_count": post.view_count,
-        "created_at": post.created_at,
-    }
+def _post_list_qs():
+    """Base queryset for every list endpoint: one join for authors, one extra
+    query for tags, regardless of page size."""
+    return Post.objects.select_related("author").prefetch_related("tags")
 
 
 @router.get("/posts", response=list[PostListOut])
+@paginate
 def list_posts(request):
-    posts = Post.objects.filter(is_published=True).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
-
-
-@router.get("/posts/search", response=list[PostListOut])
-def search_posts(request, q: str):
-    posts = Post.objects.filter(
-        Q(title__icontains=q) | Q(body__icontains=q),
-        is_published=True,
-    ).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
+    return _post_list_qs().filter(is_published=True).order_by("-created_at")
 
 
 @router.get("/posts/by-tag/{slug}", response=list[PostListOut])
+@paginate
 def posts_by_tag(request, slug: str):
     tag = get_object_or_404(Tag, slug=slug)
-    posts = tag.posts.filter(is_published=True).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
+    return _post_list_qs().filter(tags=tag, is_published=True).order_by("-created_at")
+
+
+@router.get("/posts/search", response=list[PostListOut])
+@paginate
+def search_posts(request, q: str):
+    return (
+        _post_list_qs()
+        .filter(Q(title__icontains=q) | Q(body__icontains=q), is_published=True)
+        .order_by("-created_at")
+    )
 
 
 @router.get("/posts/{post_id}", response=PostDetailOut)

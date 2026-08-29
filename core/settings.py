@@ -145,3 +145,7 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# A caller must not be able to ask for the whole table back.
+NINJA_PAGINATION_MAX_LIMIT = 100
+NINJA_PAGINATION_PER_PAGE = 20
