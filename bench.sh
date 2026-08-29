@@ -23,17 +23,27 @@ median() {
 
 # Prints one table row. Tracks how many of the attempted samples actually
 # completed inside MAX_TIME so a timeout is reported as a timeout, never as
-# a fabricated or silently-missing number.
+# a fabricated or silently-missing number. Pass "nonempty" as the 4th arg to
+# fail loudly if a completed response body is an empty JSON array `[]` --
+# guards against silently re-benchmarking "how fast is an empty result",
+# which is exactly how q=python produced a meaningless 0.181s (see before.md).
 bench() {
-  local name="$1" path="$2" runs="${3:-$RUNS}"
-  local times=() ok=0 attempted=0 t
+  local name="$1" path="$2" runs="${3:-$RUNS}" require_nonempty="${4:-}"
+  local times=() ok=0 attempted=0 t out
+  out="$(mktemp)"
   for _ in $(seq "$runs"); do
     attempted=$((attempted + 1))
-    if t="$(curl -s -o /dev/null -w '%{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
+    if t="$(curl -s -o "$out" -w '%{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
       times+=("$t")
       ok=$((ok + 1))
+      if [ -n "$require_nonempty" ] && [ "$(cat "$out")" = "[]" ]; then
+        rm -f "$out"
+        echo "FATAL: $name returned zero results -- the hardcoded search term no longer matches seeded data. Fix bench.sh, don't report this timing." >&2
+        exit 1
+      fi
     fi
   done
+  rm -f "$out"
   if [ "$ok" -eq 0 ]; then
     printf '| %-28s | %8s | %9s |\n' "$name" "TIMEOUT" "0/$attempted"
   else
@@ -46,7 +56,11 @@ echo
 echo "| endpoint                     | median s | samples   |"
 echo "| ---------------------------- | -------- | --------- |"
 bench "GET /posts"          "/api/posts"                                 "$SLOW_RUNS"
-bench "GET /posts/search"   "/api/posts/search?q=python"
+# "qui" is a lorem-ipsum token that Faker's text() actually generates (unlike
+# "python", which never appears in body text -- see before.md's footnote).
+# Verified against the full seed: 22,309 published posts match. Hardcoded,
+# not derived at runtime, so before/after runs search for the same thing.
+bench "GET /posts/search"   "/api/posts/search?q=qui"                    "$SLOW_RUNS" nonempty
 bench "GET /posts/by-tag"   "/api/posts/by-tag/python"                   "$SLOW_RUNS"
 bench "GET /posts/1"        "/api/posts/1"
 bench "GET /users/1"        "/api/users/1"

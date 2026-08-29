@@ -24,7 +24,7 @@ services:
              python manage.py seed --scale 0.01 &&
              python manage.py runserver 0.0.0.0:8000"
     environment:
-      DEBUG: "true"
+      DEBUG: "${DEBUG:-true}"
       SECRET_KEY: dev-only-not-a-real-secret
       ALLOWED_HOSTS: "*"
       POSTGRES_HOST: db
