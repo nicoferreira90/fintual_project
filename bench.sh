@@ -11,6 +11,18 @@
 # can't tell "this endpoint is slow" from "the server was busy with something
 # else". Upgrade to k6/wrk against the gunicorn/runtime image if a
 # throughput or concurrent-load number is ever actually needed.
+#
+# Every request carries "X-Forwarded-Proto: https". core/settings.py sets
+# SECURE_SSL_REDIRECT=True whenever DEBUG=false and reads that exact header
+# via SECURE_PROXY_SSL_HEADER -- it's the app's own declared contract for
+# "a proxy already terminated TLS", true on Fly (the production target,
+# which forwards plain HTTP with that header after terminating TLS at the
+# edge) and false for a bare `curl` hitting runserver directly. Without the
+# header every plain-HTTP request 301s to a https:// URL runserver doesn't
+# speak, and the harness's own HTTP-status guard below (correctly) FATALs
+# on the first request. Supplying it isn't a workaround around the security
+# setting -- it's benchmarking the same request shape Fly's edge actually
+# forwards, which is more faithful to production than omitting it, not less.
 set -euo pipefail
 
 BASE="${1:-http://localhost:8000}"
@@ -38,16 +50,19 @@ median() {
 # HTTP 200 -- a 404/500 fails the run loudly rather than being silently
 # timed as if it were a real answer (a fast 404 would otherwise look exactly
 # like a fast success). Pass "nonempty" as the 4th arg to additionally fail
-# loudly if a 200 response body is an empty JSON array `[]` -- guards
-# against silently re-benchmarking "how fast is an empty result", which is
-# exactly how q=python produced a meaningless 0.181s (see before.md).
+# loudly if a 200 response reports zero results -- guards against silently
+# re-benchmarking "how fast is an empty result", which is exactly how
+# q=python produced a meaningless 0.181s (see before.md). Pagination wraps
+# results in {"items":[...],"count":N}, so an empty result is detected via
+# "count":0 in the body, not via the old bare-array literal "[]" (which the
+# envelope can no longer produce -- that check stopped firing silently).
 bench() {
   local name="$1" path="$2" runs="${3:-$RUNS}" require_nonempty="${4:-}"
   local times=() ok=0 attempted=0 resp code t out
   out="$(mktemp)"
   for _ in $(seq "$runs"); do
     attempted=$((attempted + 1))
-    if resp="$(curl -s -o "$out" -w '%{http_code} %{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
+    if resp="$(curl -s -H "X-Forwarded-Proto: https" -o "$out" -w '%{http_code} %{time_total}' --max-time "$MAX_TIME" "$BASE$path")"; then
       code="${resp%% *}"
       t="${resp#* }"
       if [ "$code" != "200" ]; then
@@ -57,7 +72,7 @@ bench() {
       fi
       times+=("$t")
       ok=$((ok + 1))
-      if [ -n "$require_nonempty" ] && [ "$(cat "$out")" = "[]" ]; then
+      if [ -n "$require_nonempty" ] && grep -qE '"count":[[:space:]]*0([^0-9]|$)' "$out"; then
         rm -f "$out"
         echo "FATAL: $name returned zero results -- the hardcoded search term no longer matches seeded data. Fix bench.sh, don't report this timing." >&2
         exit 1
@@ -77,11 +92,22 @@ echo
 echo "| endpoint                     | median s | samples   |"
 echo "| ---------------------------- | -------- | --------- |"
 bench "GET /posts"          "/api/posts"                                 "$SLOW_RUNS"
-# "qui" is a lorem-ipsum token that Faker's text() actually generates (unlike
-# "python", which never appears in body text -- see before.md's footnote).
-# Verified against the full seed: 22,309 published posts match. Hardcoded,
-# not derived at runtime, so before/after runs search for the same thing.
-bench "GET /posts/search"   "/api/posts/search?q=qui"                    "$SLOW_RUNS" nonempty
+# "manage" is a genuine whole-word match under BOTH query shapes: it's a real
+# English word in the seeded corpus (the seed's body text is
+# business-jargon-style prose, not lorem ipsum), so it matches identically
+# under ILIKE substring search and under FTS lexeme search (both count
+# 21,277 published posts -- verified directly against the full seed). Earlier
+# terms both failed this bar: "qui" (pre-migration) matched 22,309 rows via
+# ILIKE but 0 via FTS -- it only ever occurred as a substring inside longer
+# words ("require", "acquire", "quick"), never as a standalone lexeme, so it
+# silently went to zero real search work once the query changed to FTS, and
+# the pre-pagination "[]" empty-result guard could never catch it. "runs" (a
+# later, also-wrong attempt) matched 0 rows via ILIKE and ~9k via FTS -- the
+# mirror-image mistake, wrong for the *before* side instead. "manage"
+# matches the same rows either way, so it's a valid discriminator across the
+# ILIKE-to-FTS migration. Hardcoded, not derived at runtime, so before/after
+# runs search for the same thing.
+bench "GET /posts/search"   "/api/posts/search?q=manage"                  "$SLOW_RUNS" nonempty
 bench "GET /posts/by-tag"   "/api/posts/by-tag/python"                   "$SLOW_RUNS"
 bench "GET /posts/1"        "/api/posts/1"
 bench "GET /users/1"        "/api/users/1"

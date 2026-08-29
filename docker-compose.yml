@@ -38,6 +38,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      # X-Forwarded-Proto: https matches bench.sh's own workaround for the
+      # same cause -- under DEBUG=false, SECURE_SSL_REDIRECT 301s any plain-
+      # HTTP request (including this probe's), which would otherwise mark
+      # the container permanently unhealthy. Harmless in the DEBUG=true
+      # default and on Fly (the edge sets the header for real), but wrong
+      # without it whenever this stack runs with DEBUG=false.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen(urllib.request.Request('http://localhost:8000/healthz', headers={'X-Forwarded-Proto': 'https'}))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
 
 volumes:
   pgdata:

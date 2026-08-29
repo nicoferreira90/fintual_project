@@ -1,6 +1,10 @@
-from django.db.models import Q
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db import transaction
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from ninja import Router
+from ninja.errors import HttpError
+from ninja.pagination import paginate
 
 from blog.models import Comment, Post, Tag, User
 from blog.schemas import (
@@ -15,73 +19,66 @@ from blog.schemas import (
 
 router = Router()
 
-
-def _serialize_author(user: User) -> dict:
-    return {
-        "id": user.id,
-        "username": user.username,
-        "display_name": user.display_name,
-    }
+MAX_EMBEDDED_COMMENTS = 50
 
 
-def _serialize_tag(tag: Tag) -> dict:
-    return {"id": tag.id, "name": tag.name, "slug": tag.slug}
-
-
-def _serialize_post_list(post: Post) -> dict:
-    return {
-        "id": post.id,
-        "title": post.title,
-        "author": _serialize_author(post.author),
-        "tags": [_serialize_tag(t) for t in post.tags.all()],
-        "view_count": post.view_count,
-        "created_at": post.created_at,
-    }
+def _post_list_qs():
+    """Base queryset for every list endpoint: one join for authors, one extra
+    query for tags, regardless of page size."""
+    return Post.objects.select_related("author").prefetch_related("tags")
 
 
 @router.get("/posts", response=list[PostListOut])
+@paginate
 def list_posts(request):
-    posts = Post.objects.filter(is_published=True).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
-
-
-@router.get("/posts/search", response=list[PostListOut])
-def search_posts(request, q: str):
-    posts = Post.objects.filter(
-        Q(title__icontains=q) | Q(body__icontains=q),
-        is_published=True,
-    ).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
+    return _post_list_qs().filter(is_published=True).order_by("-created_at")
 
 
 @router.get("/posts/by-tag/{slug}", response=list[PostListOut])
+@paginate
 def posts_by_tag(request, slug: str):
     tag = get_object_or_404(Tag, slug=slug)
-    posts = tag.posts.filter(is_published=True).order_by("-created_at")
-    return [_serialize_post_list(p) for p in posts]
+    return _post_list_qs().filter(tags=tag, is_published=True).order_by("-created_at")
+
+
+@router.get("/posts/search", response=list[PostListOut])
+@paginate
+def search_posts(request, q: str):
+    query = SearchQuery(q, config="english")
+    return (
+        _post_list_qs()
+        .filter(search_vector=query, is_published=True)
+        .annotate(rank=SearchRank(F("search_vector"), query))
+        .order_by("-rank", "-created_at")
+    )
 
 
 @router.get("/posts/{post_id}", response=PostDetailOut)
 def get_post(request, post_id: int):
-    post = get_object_or_404(Post, id=post_id)
-    post.view_count += 1
-    post.save()
+    post = get_object_or_404(_post_list_qs(), id=post_id)
 
-    comments = [
-        {
-            "id": c.id,
-            "author": _serialize_author(c.author),
-            "body": c.body,
-            "created_at": c.created_at,
-        }
-        for c in post.comments.order_by("created_at")
-    ]
+    # Single-column atomic bump. post.save() rewrote the whole row (body
+    # included) on every read, lost concurrent increments, and silently moved
+    # updated_at because of auto_now.
+    # ponytail: still one write per read. Batch in memory or move the counter to
+    # Redis and flush periodically if this becomes the bottleneck.
+    Post.objects.filter(pk=post.pk).update(view_count=F("view_count") + 1)
+    post.view_count += 1
+
+    # ponytail: hot posts carry tens of thousands of comments; cap rather than
+    # stream. A paginated /posts/{id}/comments endpoint is the upgrade.
+    comments = list(
+        post.comments.select_related("author").order_by("created_at")[
+            :MAX_EMBEDDED_COMMENTS
+        ]
+    )
+
     return {
         "id": post.id,
         "title": post.title,
         "body": post.body,
-        "author": _serialize_author(post.author),
-        "tags": [_serialize_tag(t) for t in post.tags.all()],
+        "author": post.author,
+        "tags": post.tags.all(),
         "comments": comments,
         "view_count": post.view_count,
         "created_at": post.created_at,
@@ -92,14 +89,18 @@ def get_post(request, post_id: int):
 @router.post("/posts", response=PostCreateOut)
 def create_post(request, payload: PostCreateIn):
     author = get_object_or_404(User, id=payload.author_id)
-    post = Post.objects.create(
-        author=author,
-        title=payload.title,
-        body=payload.body,
-    )
-    for slug in payload.tag_slugs:
-        tag = Tag.objects.get(slug=slug)
-        post.tags.add(tag)
+    with transaction.atomic():
+        post = Post.objects.create(
+            author=author,
+            title=payload.title,
+            body=payload.body,
+        )
+        if payload.tag_slugs:
+            tags = list(Tag.objects.filter(slug__in=payload.tag_slugs))
+            missing = set(payload.tag_slugs) - {tag.slug for tag in tags}
+            if missing:
+                raise HttpError(404, f"unknown tag slugs: {', '.join(sorted(missing))}")
+            post.tags.set(tags)
     return {"id": post.id, "title": post.title}
 
 

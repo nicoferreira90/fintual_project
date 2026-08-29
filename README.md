@@ -4,38 +4,58 @@ A small content service: users, posts, comments, tags. Django + Ninja + Postgres
 
 ## Running it locally
 
-Prereqs:
-
-- [mise](https://mise.jdx.dev/) — manages the Python toolchain and uv.
-- A running PostgreSQL 16 instance on `localhost:5432` with a database called `backend_devops_interview` accessible to `postgres`/`postgres`. (Local install, `brew install postgresql@16`, host-mode docker, whatever you have.)
-
-Steps:
+Prereq: [Docker](https://docs.docker.com/get-docker/) (with Compose). Nothing else.
 
 ```sh
-mise install
-uv sync
-createdb backend_devops_interview        # or however you create it
-uv run python manage.py migrate
-uv run python manage.py seed
-uv run python manage.py runserver
+docker compose up
 ```
 
-API docs at <http://localhost:8000/api/docs>.
+That's it. On first boot the `web` service migrates the database and seeds
+**1% of the dataset** (~1,000 posts, ~5,000 comments — enough to click
+through the API in seconds, not the ~50s the full seed takes) before
+starting the dev server. API docs at <http://localhost:8000/api/docs>.
 
-Seeding writes ~100k posts and ~500k comments. Expect a few minutes.
+Need the full ~100k-post / ~500k-comment dataset (e.g. to reproduce the
+numbers in `docs/bench/`)?
+
+```sh
+docker compose run --rm web python manage.py seed --force
+```
+
+Run the tests:
+
+```sh
+docker compose run --rm web pytest
+```
+
+### Pagination
+
+The three list endpoints (`/api/posts`, `/api/posts/by-tag/{slug}`,
+`/api/posts/search`) return a paginated envelope, not a bare array:
+
+```json
+{"items": [ ... ], "count": 1234}
+```
+
+Control the page with query params: `?limit=&offset=` (default `limit=20`,
+max `limit=100` — a caller can't ask for the whole table back in one
+request).
 
 ## What the API does
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| GET    | `/api/posts` | Published posts, newest first |
-| GET    | `/api/posts/search?q=` | Full-text-ish search across title and body |
-| GET    | `/api/posts/by-tag/{slug}` | Posts carrying a given tag |
-| GET    | `/api/posts/{id}` | Post detail with comments |
+| GET    | `/api/posts` | Published posts, newest first (paginated) |
+| GET    | `/api/posts/search?q=` | Full-text search across title and body (paginated) |
+| GET    | `/api/posts/by-tag/{slug}` | Posts carrying a given tag (paginated) |
+| GET    | `/api/posts/{id}` | Post detail with up to 50 embedded comments |
 | POST   | `/api/posts` | Create a post |
 | POST   | `/api/posts/{id}/comments` | Add a comment to a post |
 | GET    | `/api/users/{id}` | User profile with post and comment counts |
 | GET    | `/api/users/find?email=` | Look up a user by email |
+
+See `NOTES.md` for what changed under the hood, why, what was deliberately
+left out, and the AI-assistance disclosure.
 
 ## The assignment
 
