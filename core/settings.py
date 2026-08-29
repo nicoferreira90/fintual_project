@@ -147,6 +147,10 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # A caller must not be able to ask for the whole table back.
+# ponytail: offset pagination degrades at depth -- a high `offset` still
+# makes Postgres walk and discard every row before it. Fine at this dataset
+# size and page depth; keyset pagination (WHERE created_at < :cursor) is the
+# upgrade if deep pages ever become a real access pattern.
 NINJA_PAGINATION_MAX_LIMIT = 100
 NINJA_PAGINATION_PER_PAGE = 20
 
